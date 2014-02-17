@@ -2810,7 +2810,7 @@ Signed-off-by: John Crispin <blogic@openwrt.org>
 +#endif
 --- /dev/null
 +++ b/drivers/net/ethernet/ralink/ralink_soc_eth.c
-@@ -0,0 +1,769 @@
+@@ -0,0 +1,846 @@
 +/*
 + *   This program is free software; you can redistribute it and/or modify
 + *   it under the terms of the GNU General Public License as published by
@@ -2850,8 +2850,9 @@ Signed-off-by: John Crispin <blogic@openwrt.org>
 +#include "esw_rt3052.h"
 +#include "mdio.h"
 +
-+#define TX_TIMEOUT		(20 * HZ / 100)
++#define TX_TIMEOUT		(2 * HZ)
 +#define	MAX_RX_LENGTH		1536
++#define DMA_DUMMY_DESC		0xffffffff
 +
 +static const u32 fe_reg_table_default[FE_REG_COUNT] = {
 +	[FE_REG_PDMA_GLO_CFG] = FE_PDMA_GLO_CFG,
@@ -3052,12 +3053,41 @@ Signed-off-by: John Crispin <blogic@openwrt.org>
 +	netdev_reset_queue(priv->netdev);
 +}
 +
++static void fe_start_tso(struct sk_buff *skb, struct net_device *dev, unsigned int nr_frags, int idx)
++{
++        struct fe_priv *priv = netdev_priv(dev);
++	struct skb_frag_struct *frag;
++	int i;
++
++	for (i = 0; i < nr_frags; i++) {
++		dma_addr_t mapped_addr;
++
++		frag = &skb_shinfo(skb)->frags[i];
++		mapped_addr = skb_frag_dma_map(&dev->dev, frag, 0, skb_frag_size(frag), DMA_TO_DEVICE);
++		if (i % 2) {
++			idx = (idx + 1) % NUM_DMA_DESC;
++			priv->tx_dma[idx].txd1 = mapped_addr;
++			if (i == nr_frags - 1)
++				priv->tx_dma[idx].txd2 = TX_DMA_LSO | TX_DMA_PLEN0(frag->size);
++			else
++				priv->tx_dma[idx].txd2 = TX_DMA_PLEN0(frag->size);
++		} else {
++			priv->tx_dma[idx].txd3 = mapped_addr;
++			if (i == nr_frags - 1)
++				priv->tx_dma[idx].txd2 |= TX_DMA_LS1 | TX_DMA_PLEN1(frag->size);
++			else
++				priv->tx_dma[idx].txd2 |= TX_DMA_PLEN1(frag->size);
++		}
++	}
++}
++
 +static int fe_start_xmit(struct sk_buff *skb, struct net_device *dev)
 +{
++	unsigned int nr_frags = skb_shinfo(skb)->nr_frags;
 +	struct fe_priv *priv = netdev_priv(dev);
 +	dma_addr_t mapped_addr;
-+	u32 tx_next;
-+	u32 tx;
++	u32 tx_next, tx, tx_num = 1;
++	int i;
 +
 +	if (priv->soc->min_pkt_len) {
 +		if (skb->len < priv->soc->min_pkt_len) {
@@ -3078,8 +3108,9 @@ Signed-off-by: John Crispin <blogic@openwrt.org>
 +	spin_lock(&priv->page_lock);
 +
 +	tx = fe_reg_r32(FE_REG_TX_CTX_IDX0);
-+	tx_next = (tx + 1) % NUM_DMA_DESC;
-+
++	if (priv->soc->tso && nr_frags)
++		tx_num += nr_frags >> 1;
++	tx_next = (tx + tx_num) % NUM_DMA_DESC;
 +	if ((priv->tx_skb[tx]) || (priv->tx_skb[tx_next]) ||
 +			!(priv->tx_dma[tx].txd2 & TX_DMA_DONE) ||
 +			!(priv->tx_dma[tx_next].txd2 & TX_DMA_DONE))
@@ -3091,7 +3122,15 @@ Signed-off-by: John Crispin <blogic@openwrt.org>
 +		return NETDEV_TX_OK;
 +	}
 +
-+	priv->tx_skb[tx] = skb;
++	if (priv->soc->tso) {
++		int t = tx_num;
++
++		priv->tx_skb[(tx + t - 1) % NUM_DMA_DESC] = skb;
++		while (--t)
++			priv->tx_skb[(tx + t - 1) % NUM_DMA_DESC] = (struct sk_buff *) DMA_DUMMY_DESC;
++	} else {
++		priv->tx_skb[tx] = skb;
++	}
 +	priv->tx_dma[tx].txd1 = (unsigned int) mapped_addr;
 +	wmb();
 +
@@ -3106,9 +3145,36 @@ Signed-off-by: John Crispin <blogic@openwrt.org>
 +	else
 +		priv->tx_dma[tx].txd4 &= ~TX_DMA_CHKSUM;
 +
++	if (priv->soc->tso)
++		fe_start_tso(skb, dev, nr_frags, tx);
++
++	if (skb_shinfo(skb)->gso_segs > 1) {
++		struct iphdr *iph = NULL;
++		struct tcphdr *th = NULL;
++		struct ipv6hdr *ip6h = NULL;
++
++		ip6h = (struct ipv6hdr *) skb_network_header(skb);
++		iph = (struct iphdr *) skb_network_header(skb);
++		if ((iph->version == 4) && (iph->protocol == IPPROTO_TCP)) {
++			th = (struct tcphdr *)skb_transport_header(skb);
++			priv->tx_dma[tx].txd4 |= BIT(28);
++			th->check = htons(skb_shinfo(skb)->gso_size);
++			dma_cache_sync(NULL, th, sizeof(struct tcphdr), DMA_TO_DEVICE);
++		} else if ((ip6h->version == 6) && (ip6h->nexthdr == NEXTHDR_TCP)) {
++			th = (struct tcphdr *)skb_transport_header(skb);
++			priv->tx_dma[tx].txd4 |= BIT(28);
++			th->check = htons(skb_shinfo(skb)->gso_size);
++			dma_cache_sync(NULL, th, sizeof(struct tcphdr), DMA_TO_DEVICE);
++		}
++	}
++
++	for (i = 0; i < tx_num; i++)
++		dma_cache_sync(NULL,  &priv->tx_dma[tx + i], sizeof(struct fe_tx_dma), DMA_TO_DEVICE);
++
 +	dev->stats.tx_packets++;
 +	dev->stats.tx_bytes += skb->len;
 +
++	wmb();
 +	fe_reg_w32(tx_next, FE_REG_TX_CTX_IDX0);
 +	netdev_sent_queue(dev, skb->len);
 +
@@ -3206,10 +3272,11 @@ Signed-off-by: John Crispin <blogic@openwrt.org>
 +		if (!(txd->txd2 & TX_DMA_DONE) || !(priv->tx_skb[priv->tx_free_idx]))
 +			break;
 +
-+		bytes_compl += priv->tx_skb[priv->tx_free_idx]->len;
++		if (priv->tx_skb[priv->tx_free_idx] != (struct sk_buff *) DMA_DUMMY_DESC) {
++			bytes_compl += priv->tx_skb[priv->tx_free_idx]->len;
++			dev_kfree_skb_irq(priv->tx_skb[priv->tx_free_idx]);
++		}
 +		pkts_compl++;
-+
-+		dev_kfree_skb_irq(priv->tx_skb[priv->tx_free_idx]);
 +		priv->tx_skb[priv->tx_free_idx] = NULL;
 +		priv->tx_free_idx++;
 +		if (priv->tx_free_idx >= NUM_DMA_DESC)
@@ -3458,6 +3525,9 @@ Signed-off-by: John Crispin <blogic@openwrt.org>
 +
 +	match = of_match_device(of_fe_match, &pdev->dev);
 +	soc = (struct fe_soc_data *) match->data;
++
++	if (soc->init_data)
++		soc->init_data(soc);
 +	if (soc->reg_table)
 +		fe_reg_table = soc->reg_table;
 +
@@ -3479,6 +3549,13 @@ Signed-off-by: John Crispin <blogic@openwrt.org>
 +
 +	if (fe_reg_table[FE_REG_FE_DMA_VID_BASE])
 +		netdev->features |= NETIF_F_HW_VLAN_CTAG_TX;
++
++	if (soc->tso) {
++		dev_info(&pdev->dev, "Enabling TSO\n");
++		netdev->features |= NETIF_F_SG | NETIF_F_TSO | NETIF_F_TSO6 | NETIF_F_IPV6_CSUM;
++	}
++
++	netdev->hw_features = netdev->vlan_features = netdev->features;
 +
 +	netdev->irq = platform_get_irq(pdev, 0);
 +	if (netdev->irq < 0) {
@@ -3582,7 +3659,7 @@ Signed-off-by: John Crispin <blogic@openwrt.org>
 +MODULE_DESCRIPTION("Ethernet driver for Ralink SoC");
 --- /dev/null
 +++ b/drivers/net/ethernet/ralink/ralink_soc_eth.h
-@@ -0,0 +1,380 @@
+@@ -0,0 +1,384 @@
 +/*
 + *   This program is free software; you can redistribute it and/or modify
 + *   it under the terms of the GNU General Public License as published by
@@ -3864,6 +3941,8 @@ Signed-off-by: John Crispin <blogic@openwrt.org>
 +
 +#define TX_DMA_PLEN0_MASK	((0x3fff) << 16)
 +#define TX_DMA_PLEN0(_x)	(((_x) & 0x3fff) << 16)
++#define TX_DMA_PLEN1(_x)	((_x) & 0x3fff)
++#define TX_DMA_LS1		BIT(14)
 +#define TX_DMA_LSO		BIT(30)
 +#define TX_DMA_DONE		BIT(31)
 +#define TX_DMA_QN(_x)		((_x) << 16)
@@ -3902,6 +3981,7 @@ Signed-off-by: John Crispin <blogic@openwrt.org>
 +	unsigned char mac[6];
 +	const u32 *reg_table;
 +
++	void (*init_data)(struct fe_soc_data *data);
 +	void (*reset_fe)(void);
 +	void (*set_mac)(struct fe_priv *priv, unsigned char *mac);
 +	void (*fwd_config)(struct fe_priv *priv);
@@ -3923,6 +4003,7 @@ Signed-off-by: John Crispin <blogic@openwrt.org>
 +	u32 rx_dly_int;
 +	u32 tx_dly_int;
 +	u32 checksum_bit;
++	u32 tso;
 +
 +	int min_pkt_len;
 +};
@@ -3965,7 +4046,7 @@ Signed-off-by: John Crispin <blogic@openwrt.org>
 +#endif /* FE_ETH_H */
 --- /dev/null
 +++ b/drivers/net/ethernet/ralink/soc_mt7620.c
-@@ -0,0 +1,154 @@
+@@ -0,0 +1,172 @@
 +/*
 + *   This program is free software; you can redistribute it and/or modify
 + *   it under the terms of the GNU General Public License as published by
@@ -3989,6 +4070,7 @@ Signed-off-by: John Crispin <blogic@openwrt.org>
 +
 +#include <asm/mach-ralink/ralink_regs.h>
 +
++#include <mt7620.h>
 +#include "ralink_soc_eth.h"
 +#include "gsw_mt7620a.h"
 +
@@ -4046,10 +4128,20 @@ Signed-off-by: John Crispin <blogic@openwrt.org>
 +
 +static void mt7620_tx_dma(struct fe_priv *priv, int idx, struct sk_buff *skb)
 +{
-+	if (skb)
-+		priv->tx_dma[idx].txd2 = TX_DMA_LSO | TX_DMA_PLEN0(skb->len);
-+	else
++	unsigned int nr_frags = 0;
++	unsigned int len = 0;
++
++	if (skb) {
++		nr_frags = skb_shinfo(skb)->nr_frags;
++		len = skb->len - skb->data_len;
++	}
++
++	if (!skb)
 +		priv->tx_dma[idx].txd2 = TX_DMA_LSO | TX_DMA_DONE;
++	else if (!nr_frags)
++		priv->tx_dma[idx].txd2 = TX_DMA_LSO | TX_DMA_PLEN0(len);
++	else
++		priv->tx_dma[idx].txd2 = TX_DMA_PLEN0(len);
 +
 +	if(skb && vlan_tx_tag_present(skb))
 +		priv->tx_dma[idx].txd4 = 0x80 | (vlan_tx_tag_get(skb) >> 13) << 4 | (vlan_tx_tag_get(skb) & 0xF);
@@ -4089,8 +4181,15 @@ Signed-off-by: John Crispin <blogic@openwrt.org>
 +}
 +#endif
 +
++static void mt7620_init_data(struct fe_soc_data *data)
++{
++	if (mt7620_get_eco() >= 5)
++		data->tso = 1;
++}
++
 +static struct fe_soc_data mt7620_data = {
 +	.mac = { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55 },
++	.init_data = mt7620_init_data,
 +	.reset_fe = mt7620_fe_reset,
 +	.set_mac = mt7620_set_mac,
 +	.fwd_config = mt7620_fwd_config,

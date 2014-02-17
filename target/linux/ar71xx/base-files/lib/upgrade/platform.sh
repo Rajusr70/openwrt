@@ -89,6 +89,23 @@ cybertan_check_image() {
 	return 0
 }
 
+platform_do_upgrade_compex() {
+	local fw_file=$1
+	local fw_part=$PART_NAME
+	local fw_mtd=$(find_mtd_part $fw_part)
+	local fw_length=0x$(dd if="$fw_file" bs=2 skip=1 count=4 2>/dev/null)
+	local fw_blocks=$(($fw_length / 65536))
+
+	if [ -n "$fw_mtd" ] &&  [ ${fw_blocks:-0} -gt 0 ]; then
+		local append=""
+		[ -f "$CONF_TAR" -a "$SAVE_CONFIG" -eq 1 ] && append="-j $CONF_TAR"
+
+		sync
+		dd if="$fw_file" bs=64k skip=1 count=$fw_blocks 2>/dev/null | \
+			mtd $append write - "$fw_part"
+	fi
+}
+
 platform_check_image() {
 	local board=$(ar71xx_board_name)
 	local magic="$(get_magic_word "$1")"
@@ -132,6 +149,7 @@ platform_check_image() {
 	dir-615-e4 | \
 	dir-825-c1 | \
 	dir-835-a1 | \
+	dragino2 | \
 	ew-dorin | \
 	ew-dorin-router | \
 	hornet-ub-x2 | \
@@ -177,7 +195,8 @@ platform_check_image() {
 		return 1
 		;;
 
-	mynet-n600)
+	mynet-n600 | \
+	mynet-n750)
 		[ "$magic_long" != "5ea3a417" ] && {
 			echo "Invalid image, bad magic: $magic_long"
 			return 1
@@ -215,8 +234,10 @@ platform_check_image() {
 	tl-wa7510n | \
 	tl-wa750re | \
 	tl-wa850re | \
+	tl-wa801nd-v2 | \
 	tl-wa901nd | \
 	tl-wa901nd-v2 | \
+	tl-wa901nd-v3 | \
 	tl-wdr3500 | \
 	tl-wdr4300 | \
 	tl-wr703n | \
@@ -286,7 +307,9 @@ platform_check_image() {
 	eap7660d | \
 	ja76pf | \
 	ja76pf2 | \
-	jwap003)
+	jwap003 | \
+	wp543 | \
+	wpe72)
 		[ "$magic" != "4349" ] && {
 			echo "Invalid image. Use *-sysupgrade.bin files on this board"
 			return 1
@@ -324,6 +347,10 @@ platform_do_upgrade() {
 	ja76pf2 | \
 	jwap003)
 		platform_do_upgrade_combined "$ARGV"
+		;;
+	wp543|\
+	wpe72)
+		platform_do_upgrade_compex "$ARGV"
 		;;
 	all0258n )
 		platform_do_upgrade_allnet "0x9f050000" "$ARGV"
