@@ -30,6 +30,7 @@
 #define ALIGN(x,a) ({ typeof(a) __a = (a); (((x) + __a - 1) & ~(__a - 1)); })
 
 #define HEADER_VERSION_V1	0x01000000
+#define HWID_GS_OOLITE_V1       0x3C000101
 #define HWID_TL_MR10U_V1	0x00100101
 #define HWID_TL_MR13U_V1	0x00130101
 #define HWID_TL_MR3020_V1	0x30200001
@@ -189,6 +190,18 @@ static struct flash_layout layouts[] = {
 		.kernel_la	= 0x00000000,
 		.kernel_ep	= 0xc0000000,
 		.rootfs_ofs	= 0x2a0000,
+	}, {
+                .id             = "16M",
+                .fw_max_len     = 0xfc0000,
+                .kernel_la      = 0x80060000,
+                .kernel_ep      = 0x80060000,
+                .rootfs_ofs     = 0x140000,
+        }, {
+                .id             = "16Mlzma",
+                .fw_max_len     = 0xfc0000,
+                .kernel_la      = 0x80060000,
+                .kernel_ep      = 0x80060000,
+                .rootfs_ofs     = 0x100000,
 	}, {
 		/* terminating entry */
 	}
@@ -360,6 +373,11 @@ static struct board_info boards[] = {
 		.hw_id		= HWID_TL_WR720N_V3,
 		.hw_rev		= 1,
 		.layout_id	= "4Mlzma",
+	}, {
+		.id             = "GS-OOLITEv1", 
+                .hw_id          = "HWID_GS_OOLITE_V1"
+		.hw_rev         = 1, 
+                .layout_id      = "16Mlzma", 
 	}, {
 		/* terminating entry */
 	}
