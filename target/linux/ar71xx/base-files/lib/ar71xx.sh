@@ -93,6 +93,7 @@ tplink_board_detect() {
 	case "$hwid" in
 	"3C0001"*) 
 		model="OOLITE"
+		;;
 	"070300"*)
 		model="TP-Link TL-WR703N"
 		;;
@@ -205,6 +206,7 @@ ar71xx_board_detect() {
 	case "$machine" in
 	*"Oolite V1.0")
 		name="oolite"
+		;;
 	*"AirRouter")
 		name="airrouter"
 		;;
