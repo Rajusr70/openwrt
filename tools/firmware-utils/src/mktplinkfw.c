@@ -382,10 +382,10 @@ static struct board_info boards[] = {
 		.hw_rev		= 1,
 		.layout_id	= "4Mlzma",
 	}, {
-		.id             = "GS-OOLITEv1", 
+		.id             = "GS-OOLITEv1",
                 .hw_id          = HWID_GS_OOLITE_V1,
-		.hw_rev         = 1, 
-                .layout_id      = "16Mlzma", 
+		.hw_rev         = 1,
+                .layout_id      = "16Mlzma",
 	}, {
 		/* terminating entry */
 	}

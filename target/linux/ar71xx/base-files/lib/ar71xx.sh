@@ -91,7 +91,7 @@ tplink_board_detect() {
 	hwver="v${hwver#0}"
 
 	case "$hwid" in
-	"3C0001"*) 
+	"3C0001"*)
 		model="OOLITE"
 		;;
 	"070300"*)

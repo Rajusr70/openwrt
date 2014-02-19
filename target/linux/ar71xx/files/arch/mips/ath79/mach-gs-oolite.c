@@ -41,7 +41,7 @@
 
 #define GS_OOLITE_GPIO_BTN6		6
 #define GS_OOLITE_GPIO_BTN7		7
-#define GS_OOLITE_GPIO_BTN_RESET		11  
+#define GS_OOLITE_GPIO_BTN_RESET		11
 
 #define GS_OOLITE_GPIO_LED_SYSTEM		27
 
@@ -70,27 +70,27 @@ static struct gpio_led GS_OOLITE_leds_gpio[] __initdata = {
 		.name		= "gpio1",
 		.gpio		= GS_OOLITE_GPIO1,
 		.active_low	= 1,
-	},{	
+	},{
 		.name		= "gpio8",
 		.gpio		= GS_OOLITE_GPIO8,
 		.active_low	= 1,
-	},{	
+	},{
 		.name		= "gpio13",
 		.gpio		= GS_OOLITE_GPIO13,
 		.active_low	= 1,
-	},{	
+	},{
 		.name		= "gpio14",
 		.gpio		= GS_OOLITE_GPIO14,
 		.active_low	= 1,
-	},{	
+	},{
 		.name		= "gpio15",
 		.gpio		= GS_OOLITE_GPIO15,
 		.active_low	= 1,
-	},{	
+	},{
 		.name		= "gpio16",
 		.gpio		= GS_OOLITE_GPIO16,
 		.active_low	= 1,
-	},{	
+	},{
 		.name		= "gpio17",
 		.gpio		= GS_OOLITE_GPIO17,
 		.active_low	= 1,
