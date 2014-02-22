@@ -21,24 +21,6 @@
 #include "machtypes.h"
 #include "dev-usb.h"
 
-#define GS_OOLITE_GPIO0			0
-#define GS_OOLITE_GPIO1			1
-#define GS_OOLITE_GPIO8			8
-#define GS_OOLITE_GPIO13			13
-#define GS_OOLITE_GPIO14			14
-#define GS_OOLITE_GPIO15			15
-#define GS_OOLITE_GPIO16			16
-#define GS_OOLITE_GPIO17			17
-#define GS_OOLITE_GPIO18			18
-#define GS_OOLITE_GPIO19			19
-#define GS_OOLITE_GPIO20			20
-#define GS_OOLITE_GPIO21			21
-#define GS_OOLITE_GPIO22			22
-#define GS_OOLITE_GPIO26			26
-
-#define GS_OOLITE_GPIO23			23
-#define GS_OOLITE_GPIO24			24
-
 #define GS_OOLITE_GPIO_BTN6		6
 #define GS_OOLITE_GPIO_BTN7		7
 #define GS_OOLITE_GPIO_BTN_RESET		11
@@ -103,14 +85,6 @@ static void __init GS_OOLITE_setup(void)
 	ath79_register_gpio_keys_polled(-1, GS_OOLITE_KEYS_POLL_INTERVAL,
 					ARRAY_SIZE(GS_OOLITE_gpio_keys),
 					GS_OOLITE_gpio_keys);
-
-	/*
-	ath79_gpio_function_disable(AR933X_GPIO_FUNC_ETH_SWITCH_LED0_EN |
-				     AR933X_GPIO_FUNC_ETH_SWITCH_LED1_EN |
-				     AR933X_GPIO_FUNC_ETH_SWITCH_LED2_EN |
-				     AR933X_GPIO_FUNC_ETH_SWITCH_LED3_EN |
-				     AR933X_GPIO_FUNC_ETH_SWITCH_LED4_EN);
-	*/
 
 	ath79_register_usb();
 
